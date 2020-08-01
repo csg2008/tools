@@ -1,0 +1,9 @@
+[
+    {"label":"大鱼", "url":"http://dysmsapi.aliyuncs.com/", "param":"Signature=W%2BgD7uk5uUDc%2FZvlshCmtWmLiBo%3D&AccessKeyId=LTAIme5zg48zu9cG&Action=SendSms&Format=JSON&PhoneNumbers=15801817054&RegionId=cn-hangzhou&SignName=%E5%9B%9B%E5%B7%9D%E5%B7%9D%E8%88%AA%E7%89%A9%E6%B5%81%E7%94%B5%E5%95%86&SignatureMethod=HMAC-SHA1&SignatureNonce=235085e40e4aabb5b06.12893692&SignatureVersion=1.0&TemplateCode=SMS_96510010&TemplateParam=%7B%22weburl_name%22%3A%22%E5%9B%9B%E5%B7%9D%E8%88%AA%E7%A9%BA%22%2C%22code%22%3A155204%7D&Timestamp=2020-02-10T05%3A05%3A46Z&Version=2017-05-25"},
+    {"label":"alicdn", "url":"https://img.alicdn.com/tfs/TB1NzseleH2gK0jSZJnXXaT1FXa-190-400.png"},
+    {"label":"1688", "url":"https://fuzhuang.1688.com/nvzhuang?spm=a260k.dacugeneral.home2019category.1.6633436cD0hmjB"},
+    {"label":"天猫", "url":"https://nvzhuang.tmall.com/?spm=875.7931836/B.category2016010.1.661442650ugCWa&acm=lb-zebra-148799-667863.1003.4.708026&scm=1003.4.lb-zebra-148799-667863.OTHER_14561681423980_708026"},
+    {"label":"淘宝", "url":"https://www.taobao.com/markets/nvzhuang/taobaonvzhuang?spm=a21bo.2017.201867-main.1.5af911d92eI408"},
+    {"label":"百度", "url":"https://mss0.bdstatic.com/se/static/act/captain/bundles/458/a6dc3abe.e3e8a95f.js"},
+    {"label":"京东", "url":"https://storage.360buyimg.com/babelpc/static/css/mall.595bf56a.css"}
+]
