@@ -1,0 +1,26 @@
+{
+    "DumpWord": false,
+    "Input": "漢字音形義字典20191017.txt",
+    "Output": "",
+    "SkipWord": null,
+    "SkipContent": null,
+    "Prepare": [
+        [" alt=\"\"", ""],
+        [" title=\"\"", ""],
+        [" class=\" \"", ""],
+        [" style=\"\"", ""]
+    ],
+    "Post": [
+        ["<A", "<a"]
+    ],
+    "Rules": [{
+        "Selector": "",
+        "Action": "Tidy",
+        "Param": {
+            "SkipComment": true,
+            "EscapeBracket": false,
+            "Drop": ["textarea"],
+            "UnWrap": ["html", "body", "head", "meta", "noscript"]
+        }
+    }]
+}
