@@ -1547,7 +1547,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "使用说明: tidy -e <启动入口> -c <配置文件>")
 		fmt.Fprintln(os.Stderr, "欢迎使用 MDict 词典源文件整理工具")
-		fmt.Fprintln(os.Stderr, "更多信息：http://github.com/csg800/MdictTidy")
+		fmt.Fprintln(os.Stderr, "更多信息：https://github.com/csg2008/tools/tree/master/MDictTools")
 		fmt.Fprintln(os.Stderr, "")
 
 		fmt.Fprintln(os.Stderr, "参数选项:")

@@ -23,7 +23,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "使用说明:", strings.TrimRight(filepath.Base(os.Args[0]), filepath.Ext(os.Args[0])), " 参数选项")
 		fmt.Fprintln(os.Stderr, "欢迎使用华为路由器自动重启工具")
-		fmt.Fprintln(os.Stderr, "更多信息：http://github.com/csg800/tools")
+		fmt.Fprintln(os.Stderr, "更多信息：https://github.com/csg2008/tools/tree/master/router")
 		fmt.Fprintln(os.Stderr, "")
 
 		fmt.Fprintln(os.Stderr, "参数选项:")
