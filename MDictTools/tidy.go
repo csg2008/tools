@@ -685,7 +685,7 @@ func parseBody(data []byte, start int, end int) *Entry {
 				last = idx
 				word = true
 				entry = &Entry{
-					word:  string(bytes.TrimSpace(data[start:idx])),
+					word:  strings.Trim(string(data[start:idx]), "\r\n\t "),
 					start: start,
 					end:   end,
 				}
@@ -697,8 +697,8 @@ func parseBody(data []byte, start int, end int) *Entry {
 		} else if flag && '@' == data[idx] && idx+2 < end && '@' == data[idx+1] && '@' == data[idx+2] {
 			pair = strings.SplitN(string(data[idx+3:end]), "=", 2)
 			if 2 == len(pair) {
-				entry.action = pair[0]
-				entry.value = pair[1]
+				entry.action = strings.Trim(pair[0], "\r\n\t ")
+				entry.value = strings.Trim(pair[1], "\r\n\t ")
 
 				break
 			}
@@ -737,7 +737,54 @@ func splitMdxData(data []byte) []*Entry {
 		}
 	}
 
-	return entries
+	return stripBlockHoleEntry(entries)
+}
+
+// stripBlockHoleEntry 去除无效的词链接
+func stripBlockHoleEntry(in []*Entry) []*Entry {
+	var ok bool
+	var miss = 0
+	var out = make([]*Entry, 0, len(in))
+	var link = make(map[string]string, 100)
+	var mapper = make(map[string]bool, len(in))
+
+	for _, v := range in {
+		if "link" == strings.ToLower(v.action) {
+			link[v.word] = v.value
+		} else {
+			mapper[v.word] = true
+		}
+	}
+
+	for {
+		miss = 0
+		for k, v := range link {
+			if _, ok = link[v]; !ok && !mapper[v] {
+				delete(link, k)
+				miss++
+			}
+		}
+		if miss == 0 {
+			break
+		}
+	}
+
+	for _, v := range in {
+		if len(v.word) > 1024 {
+			fmt.Println(v.word)
+		}
+		if "link" == strings.ToLower(v.action) {
+			if _, ok = link[v.word]; ok {
+				out = append(out, v)
+			} else {
+				//fmt.Println(v.word)
+			}
+		} else {
+			out = append(out, v)
+		}
+	}
+
+	return out
 }
 
 // 解析词条内容为标签
