@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strconv"
@@ -638,7 +637,7 @@ func LoadJSON(file string, in interface{}) error {
 	var err error
 	var data []byte
 
-	if data, err = ioutil.ReadFile(file); nil == err {
+	if data, err = os.ReadFile(file); nil == err {
 		err = json.Unmarshal(data, in)
 	}
 
@@ -1040,7 +1039,7 @@ func tidyMdict(cfg string) error {
 
 	fmt.Println("read file before")
 	if "" != opt.Style {
-		if data, err = ioutil.ReadFile(opt.Style); nil == err {
+		if data, err = os.ReadFile(opt.Style); nil == err {
 			style = make(map[string][2]string, 25)
 			rawStyle = bytes.Split(data, []byte{'\n'})
 			for k, v := range rawStyle {
@@ -1057,7 +1056,7 @@ func tidyMdict(cfg string) error {
 		}
 	}
 
-	if data, err = ioutil.ReadFile(opt.Input); nil != err {
+	if data, err = os.ReadFile(opt.Input); nil != err {
 		return err
 	}
 
@@ -1132,7 +1131,7 @@ func getSourceUsage(opt *CSSOption) (map[string]map[string]int, error) {
 	var pair []string
 	var ok, fintIt, hasSpace bool
 	var pos, spacePos, length int
-	var data, err = ioutil.ReadFile(opt.Source)
+	var data, err = os.ReadFile(opt.Source)
 	var skipAttr = make(map[string]bool, len(opt.SkipAttr))
 	var ret = map[string]map[string]int{
 		"id":    make(map[string]int, 100),
@@ -1223,7 +1222,7 @@ func getCSSUsage(opt *CSSOption) ([][3]string, error) {
 	var key, val string
 	var pos, fPos, nCr, nLn int
 	var selector = make([][3]string, 0, 1000)
-	var data, err = ioutil.ReadFile(opt.CSS)
+	var data, err = os.ReadFile(opt.CSS)
 
 	if nil == err {
 		for k, v := range data {
@@ -1492,10 +1491,10 @@ func mergeDict(cfg string) error {
 		opt.Output = opt.Target[0:len(opt.Target)-4] + ".new.txt"
 	}
 
-	if sData, err = ioutil.ReadFile(opt.Source); nil != err {
+	if sData, err = os.ReadFile(opt.Source); nil != err {
 		return err
 	}
-	if tData, err = ioutil.ReadFile(opt.Target); nil != err {
+	if tData, err = os.ReadFile(opt.Target); nil != err {
 		return err
 	}
 
