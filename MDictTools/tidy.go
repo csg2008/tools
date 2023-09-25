@@ -467,22 +467,24 @@ func (d *Dom) Insert(value string, idx int64, after bool) {
 // Tidy 整理标签树
 //
 // 实现的功能
-//   1、清理掉不是 mdx 源文件需要的标签
-//   2、清理掉不正常关闭的标签
-//   3、清理掉空的内容
-//   4、根据选项开关清理注释
-//   5、关闭未关闭的标签
-//   6、根据规则清理标签
+//
+//	1、清理掉不是 mdx 源文件需要的标签
+//	2、清理掉不正常关闭的标签
+//	3、清理掉空的内容
+//	4、根据选项开关清理注释
+//	5、关闭未关闭的标签
+//	6、根据规则清理标签
 //
 // 实现思路：
-//  1、读取一个词条内容
-//  2、将其解析为最小单元：开始标签、内容、结束标签、注释、自关闭标签
-//  3、如果是开始标签，就将标签名入栈
-//  4、如果是内容或注释且不为空，就将其入队列
-//  5、如果是自关闭标签，就检查是否要清理的，如果是就直接丢弃，否则入队列
-//  6、如果是关闭标签，先检查是否要清理的标签，如果是就开始反向清理内容直到开始标签，再将开始标签出栈
-//     如果不是要清理的标签，就与最后的开始标签比对，如果匹配是入队列并将开始标签出栈，不匹配就直接丢弃
-//  7、结束后检查标签栈，如果不为空，就自动在后面补标签以结束内容
+//
+//	1、读取一个词条内容
+//	2、将其解析为最小单元：开始标签、内容、结束标签、注释、自关闭标签
+//	3、如果是开始标签，就将标签名入栈
+//	4、如果是内容或注释且不为空，就将其入队列
+//	5、如果是自关闭标签，就检查是否要清理的，如果是就直接丢弃，否则入队列
+//	6、如果是关闭标签，先检查是否要清理的标签，如果是就开始反向清理内容直到开始标签，再将开始标签出栈
+//	   如果不是要清理的标签，就与最后的开始标签比对，如果匹配是入队列并将开始标签出栈，不匹配就直接丢弃
+//	7、结束后检查标签栈，如果不为空，就自动在后面补标签以结束内容
 func (d *Dom) Tidy(entry *Entry, rule *Rule) {
 	var tag *Tag
 	var num, idx int
@@ -597,6 +599,10 @@ func (d *Dom) Tidy(entry *Entry, rule *Rule) {
 			break
 		}
 	}
+
+	sort.Slice(d.root, func(i int, j int) bool {
+		return d.root[i].id < d.root[j].id
+	})
 }
 
 // Apply 应用清理规则
@@ -874,13 +880,13 @@ func parseBodyItem(element *Entry, data string) *Dom {
 
 				pos = findChar(data, ' ', startPos, endPos)
 				if pos > 0 && pos < endPos {
-					tag.name = strings.ToLower(data[startPos+1 : pos])
+					tag.name = strings.Trim(strings.ToLower(data[startPos+1:pos]), "\r\n\t ")
 				} else {
-					tag.name = strings.ToLower(data[startPos+1 : endPos])
+					tag.name = strings.Trim(strings.ToLower(data[startPos+1:endPos]), "\r\n\t ")
 				}
 				if "" == tag.name {
 					tag.category = "content"
-				} else if "meta" == tag.name || "param" == tag.name || "hr" == tag.name || "br" == tag.name || "img" == tag.name || "input" == tag.name || "source" == tag.name {
+				} else if "meta" == tag.name || "param" == tag.name || "hr" == tag.name || "br" == tag.name || "img" == tag.name || "input" == tag.name || "source" == tag.name || "link" == tag.name {
 					tag.category = "self"
 				} else if "start" == tag.category && ("script" == tag.name || "style" == tag.name) {
 					isScriptOrStyle = true
@@ -1005,18 +1011,20 @@ func preprocessStyle(body []byte, style *map[string][2]string) string {
 // tidyMdict 词典源文件内容整理
 //
 // 实现的功能
-//  1、替换掉指定的内容
-//  2、清理不需要的标签
-//  3、清理不正确关闭的标签
-//  4、自动关闭未关闭的标签
+//
+//	1、替换掉指定的内容
+//	2、清理不需要的标签
+//	3、清理不正确关闭的标签
+//	4、自动关闭未关闭的标签
 //
 // 实现思路：
-//  1、读取词典源文件
-//  2、按配置预替换掉关键词内容
-//  3、拆分词典源文件内容为词条
-//  4、整理词典内容
-//  5、将整理后的词典内容拼为源文件
-//  6、按配置替换掉关键词内容
+//
+//	1、读取词典源文件
+//	2、按配置预替换掉关键词内容
+//	3、拆分词典源文件内容为词条
+//	4、整理词典内容
+//	5、将整理后的词典内容拼为源文件
+//	6、按配置替换掉关键词内容
 func tidyMdict(cfg string) error {
 	var idx int
 	var err error
@@ -1291,16 +1299,18 @@ func getCSSUsage(opt *CSSOption) ([][3]string, error) {
 // tidyCSS 整理词典 CSS 文件
 //
 // 实现的功能：
-//   1、清理未被使用的 CSS 样式
-//   2、生成词典源文件标签概览
+//
+//	1、清理未被使用的 CSS 样式
+//	2、生成词典源文件标签概览
 //
 // 实现思路：
-//   1、提取 CSS 文件中的选择器与样式内容
-//   2、提取词典源文件中标签与标签属性为标签概览
-//   3、循环检查 CSS 文件中的选择器是否出现在词典标签概览中
-//   4、设置检查标志，如果出现就标志为找到，否则就是未找到
-//   5、将找到的样式保存到新的样式文件中
-//   6、将标签概览保存到概览文件中，方便复查
+//
+//	1、提取 CSS 文件中的选择器与样式内容
+//	2、提取词典源文件中标签与标签属性为标签概览
+//	3、循环检查 CSS 文件中的选择器是否出现在词典标签概览中
+//	4、设置检查标志，如果出现就标志为找到，否则就是未找到
+//	5、将找到的样式保存到新的样式文件中
+//	6、将标签概览保存到概览文件中，方便复查
 func tidyCSS(cfg string) error {
 	var err error
 	var data []byte
