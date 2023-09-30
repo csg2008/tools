@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -797,9 +798,10 @@ func parseBodyItem(element *Entry, data string) *Dom {
 	var length = len(data)
 	var tagStack = make([]*Tag, 0, 100)
 	var container = make([]*Tag, 0, 1000)
+	var tagRegex = regexp.MustCompile(`^[a-zA-Z]+[0-9]*$`)
 	var cur, parent int64
 	var hit, hasTag, isComment, isScriptOrStyle bool
-	var pos, idx, num, endPos, startPos, lastPos, commentPos int
+	var pos, idx, num, endPos, startPos, lastStartPos, lastPos, commentPos int
 
 	for idx = 0; idx < length; idx++ {
 		if '<' == data[idx] {
@@ -823,6 +825,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 				continue
 			}
 
+			lastStartPos = startPos
 			startPos = idx
 			hasTag = true
 		}
@@ -839,6 +842,10 @@ func parseBodyItem(element *Entry, data string) *Dom {
 
 			hit = true
 			endPos = idx
+		}
+		if hasTag && ((idx-startPos > 15 && !tagRegex.MatchString(data[startPos:idx])) || data[idx] > 127) {
+			startPos = lastStartPos
+			hasTag = false
 		}
 		if hasTag && hit && endPos > startPos {
 			var tag *Tag
