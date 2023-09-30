@@ -819,6 +819,9 @@ func parseBodyItem(element *Entry, data string) *Dom {
 			if isComment && idx > commentPos {
 				continue
 			}
+			if idx+1 < length && (data[idx+1] < 65 || data[idx+1] > 122) {
+				continue
+			}
 
 			startPos = idx
 			hasTag = true
