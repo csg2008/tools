@@ -972,8 +972,8 @@ func parseBodyItem(element *Entry, data string) *Dom {
 	return &Dom{idx: cur, root: container}
 }
 
-// preprocessStyle 预处理样式
-func preprocessStyle(body []byte, style *map[string][2]string) string {
+// prepareStyle 预处理样式
+func prepareStyle(body []byte, style *map[string][2]string) string {
 	var ok bool
 	var num, pos int
 	var styleID, styleEnd string
@@ -1078,12 +1078,12 @@ func tidyMdict(cfg string) error {
 	fmt.Println("read file done")
 
 	if len(opt.Prepare) > 0 {
-		fmt.Println("preprocess file start")
+		fmt.Println("prepare file start")
 		for _, item := range opt.Prepare {
 			data = bytes.ReplaceAll(data, []byte(item[0]), []byte(item[1]))
 		}
 
-		fmt.Println("preprocess file done")
+		fmt.Println("prepare file done")
 	}
 
 	fmt.Println("split words")
@@ -1106,7 +1106,7 @@ func tidyMdict(cfg string) error {
 		if nil == style {
 			dom = parseBodyItem(element, string(body))
 		} else {
-			dom = parseBodyItem(element, preprocessStyle(body, &style))
+			dom = parseBodyItem(element, prepareStyle(body, &style))
 		}
 
 		dom.Apply(element, opt)
