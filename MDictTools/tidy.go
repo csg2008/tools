@@ -798,6 +798,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 	var length = len(data)
 	var tagStack = make([]*Tag, 0, 100)
 	var container = make([]*Tag, 0, 1000)
+	var checkOkPos = make(map[int]bool, 100)
 	var tagRegex = regexp.MustCompile(`^[a-zA-Z]+[0-9]*$`)
 	var cur, parent int64
 	var hitStart, hitEnd, isComment, isScriptOrStyle bool
@@ -829,7 +830,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 			startPos = idx
 			hitStart = true
 		}
-		if '>' == data[idx] {
+		if '>' == data[idx] && hitStart {
 			if isScriptOrStyle && ' ' == data[idx-1] && ' ' == data[idx+1] {
 				continue
 			}
@@ -843,9 +844,28 @@ func parseBodyItem(element *Entry, data string) *Dom {
 			hitEnd = true
 			endPos = idx
 		}
-		if hitStart && ((idx-startPos > 15 && !tagRegex.MatchString(data[startPos:idx])) || data[idx] > 127) {
-			startPos = lastStartPos
-			hitStart = false
+		if hitStart && !hitEnd && startPos+1 < idx {
+			if idx-startPos > 15 {
+				if !checkOkPos[startPos] {
+					pos = findChar(data, ' ', startPos, idx)
+					if pos > 0 {
+						if !tagRegex.MatchString(data[startPos+1 : pos]) {
+							startPos = lastStartPos
+							hitStart = false
+						} else {
+							checkOkPos[startPos] = true
+						}
+					} else if !tagRegex.MatchString(data[startPos+1 : idx]) {
+						startPos = lastStartPos
+						hitStart = false
+					} else {
+						checkOkPos[startPos] = true
+					}
+				}
+			} else if data[idx] > 127 {
+				startPos = lastStartPos
+				hitStart = false
+			}
 		}
 		if hitStart && hitEnd && endPos > startPos {
 			var tag *Tag
