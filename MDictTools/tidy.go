@@ -800,7 +800,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 	var container = make([]*Tag, 0, 1000)
 	var tagRegex = regexp.MustCompile(`^[a-zA-Z]+[0-9]*$`)
 	var cur, parent int64
-	var hit, hasTag, isComment, isScriptOrStyle bool
+	var hitStart, hitEnd, isComment, isScriptOrStyle bool
 	var pos, idx, num, endPos, startPos, lastStartPos, lastPos, commentPos int
 
 	for idx = 0; idx < length; idx++ {
@@ -827,7 +827,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 
 			lastStartPos = startPos
 			startPos = idx
-			hasTag = true
+			hitStart = true
 		}
 		if '>' == data[idx] {
 			if isScriptOrStyle && ' ' == data[idx-1] && ' ' == data[idx+1] {
@@ -840,14 +840,14 @@ func parseBodyItem(element *Entry, data string) *Dom {
 				continue
 			}
 
-			hit = true
+			hitEnd = true
 			endPos = idx
 		}
-		if hasTag && ((idx-startPos > 15 && !tagRegex.MatchString(data[startPos:idx])) || data[idx] > 127) {
+		if hitStart && ((idx-startPos > 15 && !tagRegex.MatchString(data[startPos:idx])) || data[idx] > 127) {
 			startPos = lastStartPos
-			hasTag = false
+			hitStart = false
 		}
-		if hasTag && hit && endPos > startPos {
+		if hitStart && hitEnd && endPos > startPos {
 			var tag *Tag
 
 			cur++
@@ -928,12 +928,12 @@ func parseBodyItem(element *Entry, data string) *Dom {
 				tag.parent = parent
 			}
 
-			hit = false
-			hasTag = false
+			hitEnd = false
+			hitStart = false
 			isComment = false
 			lastPos = idx + 1
 			container = append(container, tag)
-		} else if hasTag && startPos-lastPos > 0 {
+		} else if hitStart && startPos-lastPos > 0 {
 			cur++
 
 			var tag = &Tag{
@@ -947,7 +947,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 			lastPos = idx
 			container = append(container, tag)
 		} else if idx+1 == length && len(container) > 0 {
-			if hasTag {
+			if hitStart {
 				fmt.Println("entry ["+element.word+"] has invalid tag:", data[lastPos:], ", byte index:", idx)
 			} else {
 				cur++
