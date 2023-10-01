@@ -822,7 +822,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 			if isComment && idx > commentPos {
 				continue
 			}
-			if idx+1 < length && '/' != data[idx+1] && (data[idx+1] < 65 || data[idx+1] > 122) {
+			if idx+1 < length && '/' != data[idx+1] && '!' != data[idx+1] && (data[idx+1] < 65 || data[idx+1] > 122) {
 				continue
 			}
 
@@ -830,7 +830,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 			startPos = idx
 			hitStart = true
 		}
-		if '>' == data[idx] && hitStart {
+		if '>' == data[idx] && (hitStart || isComment || isScriptOrStyle) {
 			if isScriptOrStyle && ' ' == data[idx-1] && ' ' == data[idx+1] {
 				continue
 			}
@@ -844,7 +844,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 			hitEnd = true
 			endPos = idx
 		}
-		if hitStart && !hitEnd && startPos+1 < idx {
+		if hitStart && !hitEnd && !isComment && !isScriptOrStyle && startPos+1 < idx {
 			if idx-startPos > 15 {
 				if !checkOkPos[startPos] {
 					pos = findChar(data, ' ', startPos, idx)
