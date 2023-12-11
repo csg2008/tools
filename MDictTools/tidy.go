@@ -6,10 +6,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -27,16 +28,61 @@ type Entry struct {
 	value  string `label:"@@@动作内容"`
 }
 
+// TagAttr 标签属性
+type TagAttr struct {
+	state        bool   `label:"属性状态"`
+	lowerName    string `label:"小写属性名"`
+	originalName string `label:"原始属性名"`
+	value        string `label:"属性值"`
+	quote        string `label:"标签值引号"`
+}
+
 // Tag 标签
 type Tag struct {
-	state    bool              `label:"标签状态"`
-	id       int64             `label:"标签ID"`
-	close    int64             `label:"结束标签ID"`
-	parent   int64             `label:"上级标签ID"`
-	category string            `label:"标签分类"`
-	name     string            `label:"标签名"`
-	value    string            `label:"标签内容"`
-	attr     map[string]string `label:"标签属性"`
+	state    bool       `label:"标签状态"`
+	hasAttr  bool       `label:"标签是否有属性"`
+	dynamic  bool       `label:"属性是否动态修改"`
+	id       int64      `label:"标签ID"`
+	close    int64      `label:"结束标签ID"`
+	parent   int64      `label:"上级标签ID"`
+	category string     `label:"标签分类"`
+	name     string     `label:"标签名"`
+	value    string     `label:"标签内容"`
+	attrs    []*TagAttr `label:"标签属性"`
+}
+
+func (t *Tag) String() string {
+	if t.dynamic {
+		var buf = bytes.NewBuffer(nil)
+
+		buf.WriteString("<")
+		buf.WriteString(t.name)
+
+		for _, attr := range t.attrs {
+			if attr.state {
+				buf.WriteString(" ")
+				buf.WriteString(attr.originalName)
+				buf.WriteString("=")
+				buf.WriteString(attr.quote)
+				buf.WriteString(attr.value)
+				buf.WriteString(attr.quote)
+			}
+		}
+
+		if strings.HasSuffix(t.value, "/>") {
+			if len(t.attrs) > 0 {
+				buf.WriteString(" />")
+			} else {
+				buf.WriteString("/>")
+			}
+		} else {
+			buf.WriteString(">")
+		}
+
+		return buf.String()
+	}
+
+	return t.value
 }
 
 // Drop 设置删除标记
@@ -44,85 +90,17 @@ func (t *Tag) Drop() {
 	t.state = false
 }
 
-// Match 标签是否匹配选择器
-func (t *Tag) Match(selector string) bool {
-	var pos int
-	var val string
-	var result = true
-	var pair, values []string
-
-	selector = strings.ToLower(selector)
-	if pos = strings.Index(selector, "."); -1 != pos {
-		pair = strings.Split(selector, ".")
-		if "" != pair[0] && t.name != pair[0] || "" == pair[1] {
-			result = false
-		}
-		if result {
-			if values = strings.Split(t.Get("class"), " "); len(values) > 0 {
-				result = false
-				for _, val = range values {
-					for k, sel := range pair {
-						if k > 0 && sel == val {
-							result = true
-
-							break
-						}
-					}
-					if result {
-						break
-					}
-				}
-			} else {
-				result = false
-			}
-		}
-	} else if pos = strings.Index(selector, "#"); -1 != pos {
-		pair = strings.SplitN(selector, "#", 2)
-		if "" != pair[0] && pair[0] != t.name || "" == pair[1] {
-			result = false
-		}
-		if result && (pair[1] != t.Get("id") || pair[1] != t.Get("name")) {
-			result = false
-		}
-	} else if pos = strings.Index(selector, "["); -1 != pos {
-		pair = strings.SplitN(selector, "[", 2)
-		if "" != pair[0] && pair[0] != t.name {
-			result = false
-		}
-		if result {
-			values = strings.SplitN(strings.Trim(pair[1], "] "), "=", 2)
-			if 1 == len(values) {
-				values[0] = strings.Trim(values[0], " ")
-				if "" == t.Get(values[0]) {
-					result = false
-				}
-			} else {
-				values[0] = strings.Trim(values[0], " ")
-				values[1] = strings.Trim(values[1], " ")
-
-				if val = t.Get(values[0]); ("*" == values[1] && "" == val) || ("" != values[1] && val != values[1]) {
-					result = false
-				}
-			}
-		}
-	} else {
-		result = t.name == selector
-	}
-
-	return result
-}
-
-// Get 返回属性值
-func (t *Tag) Get(attr string) string {
-	if nil == t.attr {
+// Parse 解析标签属性
+func (t *Tag) Parse() {
+	if t.hasAttr && nil == t.attrs {
 		var flag byte
 		var pair []string
 		var key, val string
 		var pos, quoteN int
-		var quote, isFirst, fintIt bool
+		var quote, isFirst, findIt bool
 		var length = len(t.value)
 
-		t.attr = make(map[string]string, 15)
+		t.attrs = make([]*TagAttr, 0, 10)
 		for k, v := range t.value {
 			if ' ' == v || 2 == quoteN || k+1 == length || (k+2 == length && '/' == t.value[k+1]) {
 				if !isFirst {
@@ -131,7 +109,7 @@ func (t *Tag) Get(attr string) string {
 					continue
 				} else if quote {
 					continue
-				} else if fintIt {
+				} else if findIt {
 					if (k+1 < length && (' ' == t.value[k+1] || '=' == t.value[k+1])) || (k > 0 && (' ' == t.value[k-1] || '=' == t.value[k-1])) {
 						continue
 					}
@@ -142,27 +120,33 @@ func (t *Tag) Get(attr string) string {
 						pair = strings.SplitN(t.value[pos:k], "=", 2)
 					}
 					if 2 == len(pair) {
-						key = strings.ToLower(strings.Trim(pair[0], "\"' "))
-						val = strings.Trim(pair[1], "\"'/> ")
+						key = strings.Trim(pair[0], "\r\n\t\"' ")
+						val = strings.Trim(pair[1], "/> ")
 
 						if "" != key && "" != val {
-							t.attr[key] = val
+							t.attrs = append(t.attrs, &TagAttr{
+								state:        true,
+								lowerName:    strings.ToLower(key),
+								originalName: key,
+								value:        strings.Trim(val, val[0:1]+" "),
+								quote:        val[0:1],
+							})
 						}
 					}
 
 					quoteN = 0
-					fintIt = false
+					findIt = false
 				}
 			} else if '"' == v {
 				if !quote {
 					flag = '"'
 					quote = true
-					if fintIt {
+					if findIt {
 						quoteN++
 					}
 				} else if quote && '"' == flag && k > 0 && '\\' != v {
 					quote = false
-					if fintIt {
+					if findIt {
 						quoteN++
 					}
 				}
@@ -173,130 +157,210 @@ func (t *Tag) Get(attr string) string {
 				} else if quote && '\'' == flag && k > 0 && '\\' != v {
 					quote = false
 				}
-			} else if isFirst && !quote && !fintIt && '=' != v {
+			} else if isFirst && !quote && !findIt && '=' != v {
 				pos = k
-				fintIt = true
+				findIt = true
 			}
 		}
 	}
-
-	return t.attr[attr]
 }
 
-// Rule 整理规则
-type Rule struct {
-	Selector string                 `label:"选择器"`
-	Action   string                 `label:"规则动作"`
-	Param    map[string]interface{} `label:"规则参数"`
-}
+// Get 返回属性值
+func (t *Tag) Get(attr string) *TagAttr {
+	t.Parse()
 
-// Init 初始化
-func (r *Rule) Init() error {
-	var err error
-
-	if "Tidy" == r.Action {
-		if nil == r.Param {
-			r.Param = make(map[string]interface{})
+	for _, v := range t.attrs {
+		if v.state && v.lowerName == attr {
+			return v
 		}
-		if sc, ok := r.Param["SkipClose"]; ok {
-			if skip, ok := sc.(map[string]interface{}); ok {
-				var skipClose = make(map[string]bool, len(skip))
-				for k, v := range skip {
-					if vv, ok := v.(bool); ok {
-						skipClose[k] = vv
-					} else {
-						err = errors.New("Tidy 规则的 SkipClose." + k + " 值必须是布尔类型")
-					}
-				}
+	}
 
-				r.Param["SkipClose"] = skipClose
+	return nil
+}
+
+// Match 标签是否匹配选择器
+func (t *Tag) Match(selector *TagSelector) bool {
+	var val string
+	var attr *TagAttr
+	var values []string
+	var result = true
+
+	if t.hasAttr {
+		if "class" == selector.Type {
+			if "" != selector.Tag && t.name != selector.Tag {
+				result = false
 			} else {
-				err = errors.New("Tidy 规则的 SkipClose 必须是值为布尔类型的对象")
-			}
-		} else {
-			r.Param["SkipClose"] = map[string]bool{"a": true, "img": true, "hr": true, "br": true, "tr": true, "td": true, "th": true, "thead": true, "tbody": true, "link": true}
-		}
-		if sc, ok := r.Param["SkipComment"]; ok {
-			if _, ok = sc.(bool); !ok {
-				err = errors.New("Tidy 规则的 SkipComment 值必须为布尔类型")
-			}
-		} else {
-			r.Param["SkipComment"] = false
-		}
-		if eb, ok := r.Param["EscapeBracket"]; ok {
-			if _, ok = eb.(bool); !ok {
-				err = errors.New("Tidy 规则的 EscapeBracket 值必须为布尔类型")
-			}
-		} else {
-			r.Param["EscapeBracket"] = false
-		}
-		for _, tag := range []string{"UnWrap", "Drop", "Skip"} {
-			if uw, ok := r.Param[tag]; ok {
-				if uwi, ok := uw.([]interface{}); ok && len(uwi) > 0 {
-					var uws = make([]string, len(uwi))
-					for k, v := range uwi {
-						if vv, ok := v.(string); ok && "" != vv {
-							uws[k] = vv
-						} else {
-							err = errors.New("Tidy 规则的 " + tag + " 第" + strconv.FormatInt(int64(k+1), 10) + " 个值必须为字符串，且不能为空")
+				result = false
+
+				if attr = t.Get(selector.Attr); nil != attr {
+					values = strings.Split(attr.value, " ")
+					for _, val = range values {
+						for _, sel := range selector.Value {
+							if sel == val {
+								result = true
+
+								break
+							}
+						}
+						if result {
+							break
 						}
 					}
-
-					r.Param[tag] = uws
-				} else if uws, ok := uw.([]string); !ok || 0 == len(uws) {
-					err = errors.New("Tidy 规则的 " + tag + " 值必须为字符串数组，且不能为空")
 				}
+			}
+		} else if "id" == selector.Type {
+			if "" != selector.Tag && t.name != selector.Tag {
+				result = false
 			} else {
-				r.Param[tag] = make([]string, 0)
+				if attr = t.Get("id"); nil != attr && attr.value == selector.Value[0] {
+					result = true
+				} else if attr = t.Get("name"); nil != attr && attr.value == selector.Value[0] {
+					result = true
+				} else {
+					result = false
+				}
+			}
+		} else if "attr" == selector.Type {
+			if "" != selector.Tag && t.name != selector.Tag {
+				result = false
+			} else {
+				if attr = t.Get(selector.Attr); nil == attr {
+					result = false
+				} else {
+					if "" != selector.Value[0] {
+						result = false
+						if "*" == selector.Value[0] {
+							result = true
+						} else if '^' == selector.Value[0][0] && strings.HasPrefix(attr.value, selector.Value[0][1:]) {
+							result = true
+						} else if '$' == selector.Value[0][0] && strings.HasSuffix(attr.value, selector.Value[0][1:]) {
+							result = true
+						} else if '~' == selector.Value[0][0] && strings.Contains(attr.value, selector.Value[0][1:]) {
+							result = true
+						} else if attr.value == selector.Value[0] {
+							result = true
+						}
+					}
+				}
+			}
+		} else if "tag" == selector.Type {
+			result = t.name == selector.Tag
+		} else {
+			result = false
+		}
+	} else {
+		result = "tag" == selector.Type && t.name == selector.Tag
+	}
+
+	return result
+}
+
+// StripEvent 去掉事件
+func (t *Tag) StripEvent() {
+	if t.hasAttr && ("start" == t.category || "self" == t.category) {
+		t.Parse()
+
+		for _, attr := range t.attrs {
+			if strings.HasPrefix(attr.lowerName, "on") {
+				attr.state = false
+				t.dynamic = true
 			}
 		}
 	}
-
-	return err
 }
 
-// ClearAble 是否可以清理
-func (r *Rule) ClearAble(tag string) bool {
-	return r.Selector == tag
+// StripEmpty 去掉空的属性
+func (t *Tag) StripEmpty() {
+	if t.hasAttr && ("start" == t.category || "self" == t.category) {
+		t.Parse()
+
+		for _, v := range t.attrs {
+			if "" == v.value {
+				v.state = false
+				t.dynamic = true
+			}
+		}
+	}
+}
+
+// StripAttr 去掉属性
+func (t *Tag) StripAttr(names []string) {
+	if t.hasAttr && ("start" == t.category || "self" == t.category) {
+		t.Parse()
+
+		for _, v := range t.attrs {
+			for _, name := range names {
+				if v.lowerName == name {
+					v.state = false
+					t.dynamic = true
+
+					break
+				}
+			}
+		}
+	}
+}
+
+// TagSelector 标签选择器
+type TagSelector struct {
+	Type  string   `label:"类型"`
+	Tag   string   `label:"标签"`
+	Attr  string   `label:"属性名"`
+	Value []string `label:"属性值"`
 }
 
 // TidyOption 清理参数
 type TidyOption struct {
-	DumpWord bool        `label:"输出词头"`
-	Input    string      `label:"输入文件"`
-	Style    string      `label:"Style文件"`
-	Output   string      `label:"输出文件"`
-	Prepare  [][2]string `label:"预替换的关键词"`
-	Post     [][2]string `label:"后替换的关键词"`
-	Rules    []*Rule     `label:"标签清理规则"`
+	DumpWord      bool           `label:"输出词头"`
+	SkipEvent     bool           `label:"去除事件"`
+	SkipEmptyAttr bool           `label:"去除空属性"`
+	SkipComment   bool           `label:"去除注释"`
+	EscapeBracket bool           `label:"转义括号"`
+	Input         string         `label:"输入文件"`
+	Style         string         `label:"Style文件"`
+	Output        string         `label:"输出文件"`
+	Drop          []string       `label:"删除的标签"`
+	UnWrap        []string       `label:"解开的标签"`
+	SkipContent   []string       `label:"跳过的内容"`
+	Prepare       [][2]string    `label:"预替换的关键词"`
+	Post          [][2]string    `label:"后替换的关键词"`
+	selDrop       []*TagSelector `label:"删除的标签"`
+	selUnWrap     []*TagSelector `label:"删除的标签"`
 }
 
 // Init 初始化
 func (o *TidyOption) Init() error {
 	var err error
 	var msg = make([]string, 0, 10)
-	var action = map[string]bool{"Tidy": true}
 
 	if "" == o.Input {
 		msg = append(msg, "输入文件属性 Input 不能为空")
 	} else {
+		var pos = strings.LastIndex(o.Input, ".")
+
 		if "" == o.Output {
-			o.Output = o.Input[:len(o.Input)-4] + ".new.txt"
+			o.Output = o.Input[:pos] + ".new." + o.Input[pos+1:]
+		} else if o.Input == o.Output {
+			msg = append(msg, "输入文件和输出文件不能相同")
 		}
 		if "" == o.Style {
-			o.Style = o.Input[:len(o.Input)-4] + ".Style.txt"
-			if _, err = os.Stat(o.Style); nil != err {
+			o.Style = o.Input[:pos] + ".Style." + o.Input[pos+1:]
+			if _, err := os.Stat(o.Style); nil != err {
 				o.Style = ""
 			}
 		}
 	}
 
-	for k, v := range o.Rules {
-		if _, ok := action[v.Action]; !ok {
-			msg = append(msg, "第 "+strconv.FormatInt(int64(k+1), 10)+" 条规则的 Action 未实现，请确实是否拼写错误")
+	if len(o.Drop) > 0 {
+		o.selDrop = make([]*TagSelector, len(o.Drop))
+		for k, v := range o.Drop {
+			o.selDrop[k] = o.parseSelector(v)
 		}
-		if err = v.Init(); nil != err {
-			msg = append(msg, "第 "+strconv.FormatInt(int64(k+1), 10)+" 条规则初始化失败："+err.Error())
+	}
+	if len(o.UnWrap) > 0 {
+		o.selUnWrap = make([]*TagSelector, len(o.UnWrap))
+		for k, v := range o.UnWrap {
+			o.selUnWrap[k] = o.parseSelector(v)
 		}
 	}
 
@@ -304,18 +368,48 @@ func (o *TidyOption) Init() error {
 		err = errors.New(strings.Join(msg, "\n"))
 	}
 
-	return nil
+	return err
 }
 
-// ClearAble 是否可以清理
-func (o *TidyOption) ClearAble(tag string) bool {
-	for _, v := range o.Rules {
-		if v.ClearAble(tag) {
-			return true
+// parseSelector 解析选择器
+func (o *TidyOption) parseSelector(selector string) *TagSelector {
+	var pos int
+	var sel *TagSelector
+	var pair, values []string
+
+	if pos = strings.Index(selector, "."); -1 != pos {
+		pair = strings.Split(selector, ".")
+		sel = &TagSelector{
+			Type:  "class",
+			Tag:   pair[0],
+			Attr:  "class",
+			Value: pair[1:],
+		}
+	} else if pos = strings.Index(selector, "#"); -1 != pos {
+		pair = strings.SplitN(selector, "#", 2)
+		sel = &TagSelector{
+			Type:  "id",
+			Tag:   pair[0],
+			Attr:  "id",
+			Value: pair[1:],
+		}
+	} else if pos = strings.Index(selector, "["); -1 != pos {
+		pair = strings.SplitN(selector, "[", 2)
+		values = strings.SplitN(strings.Trim(pair[1], "] "), "=", 2)
+		sel = &TagSelector{
+			Type:  "attr",
+			Tag:   pair[0],
+			Attr:  strings.Trim(values[0], " "),
+			Value: []string{strings.Trim(values[1], "\r\n\t\"' ")},
+		}
+	} else {
+		sel = &TagSelector{
+			Type: "tag",
+			Tag:  selector,
 		}
 	}
 
-	return false
+	return sel
 }
 
 // CSSOption CSS 整理选项
@@ -354,13 +448,15 @@ func (d *Dom) GetSubIdx(idx int) int64 {
 }
 
 // RangeToString DOM 区间节点转换为字符串
-func (d *Dom) RangeToString(s int64, e int64) string {
+func (d *Dom) RangeToString(s int64, e int64, textOnly bool) string {
 	var tag *Tag
 	var buf = new(bytes.Buffer)
 
 	for _, tag = range d.root {
 		if tag.state && tag.id >= s && tag.id <= e {
-			buf.WriteString(tag.value)
+			if !textOnly || (textOnly && "content" == tag.category) {
+				buf.WriteString(tag.value)
+			}
 		}
 	}
 
@@ -368,18 +464,14 @@ func (d *Dom) RangeToString(s int64, e int64) string {
 }
 
 // ToString 将 DOM 树转换为字符串
-func (d *Dom) ToString() string {
+func (d *Dom) ToString(textOnly bool) string {
 	var tag *Tag
 	var idx int64
 	var sub map[int64]bool
 	var buf = new(bytes.Buffer)
 
 	if nil == d.sub {
-		for _, tag = range d.root {
-			if tag.state {
-				buf.WriteString(tag.value)
-			}
-		}
+		buf.WriteString(d.RangeToString(d.root[0].id, d.root[len(d.root)-1].id, textOnly))
 	} else if len(d.sub) > 0 {
 		sub = make(map[int64]bool, len(d.sub))
 		for _, idx = range d.sub {
@@ -387,7 +479,7 @@ func (d *Dom) ToString() string {
 		}
 		for _, tag = range d.root {
 			if sub[tag.id] {
-				buf.WriteString(d.RangeToString(tag.id, tag.close))
+				buf.WriteString(d.RangeToString(tag.id, tag.close, textOnly))
 			}
 		}
 	}
@@ -396,7 +488,7 @@ func (d *Dom) ToString() string {
 }
 
 // Find 查找 DOM 子元素
-func (d *Dom) Find(selector string) *Dom {
+func (d *Dom) Find(selector *TagSelector) *Dom {
 	var tag *Tag
 	var skip int64
 	var sub = make([]int64, 0, len(d.root))
@@ -405,9 +497,37 @@ func (d *Dom) Find(selector string) *Dom {
 		if skip > 0 && tag.id < skip {
 			continue
 		}
-		if tag.state && "" != tag.name && tag.Match(selector) {
+		if tag.state && ("start" == tag.category || "self" == tag.category) && tag.Match(selector) {
 			skip = tag.close
 			sub = append(sub, tag.id)
+		}
+	}
+
+	return &Dom{idx: d.idx, root: d.root, sub: sub}
+}
+
+// Filter 过滤 DOM 子元素
+func (d *Dom) Filter(text string) *Dom {
+	var tag, parent *Tag
+	var sub = make([]int64, 0, len(d.root))
+	var need = make(map[int64]bool, len(d.sub))
+	var subMap = make(map[int64]bool, len(d.sub))
+
+	for _, v := range d.sub {
+		need[v] = true
+	}
+	for _, tag = range d.root {
+		if need[tag.id] {
+			parent = tag
+		} else if nil != parent && !subMap[parent.id] {
+			if parent.close == tag.id {
+				parent = nil
+			} else if tag.id < parent.close {
+				if -1 != strings.Index(tag.value, text) {
+					sub = append(sub, parent.id)
+					subMap[parent.id] = true
+				}
+			}
 		}
 	}
 
@@ -486,19 +606,14 @@ func (d *Dom) Insert(value string, idx int64, after bool) {
 //	6、如果是关闭标签，先检查是否要清理的标签，如果是就开始反向清理内容直到开始标签，再将开始标签出栈
 //	   如果不是要清理的标签，就与最后的开始标签比对，如果匹配是入队列并将开始标签出栈，不匹配就直接丢弃
 //	7、结束后检查标签栈，如果不为空，就自动在后面补标签以结束内容
-func (d *Dom) Tidy(entry *Entry, rule *Rule) {
+func (d *Dom) Tidy(entry *Entry, opt *TidyOption) {
 	var tag *Tag
 	var num, idx int
 	var dropClose int64
 	var lastTag, skip string
 	var tags = make([]*Tag, 0, 300)
-	var Drop = rule.Param["Drop"].([]string)
-	var skips = rule.Param["Skip"].([]string)
-	var unWrap = rule.Param["UnWrap"].([]string)
-	var unWrapID = make(map[int64]bool, len(unWrap))
-	var skipComment = rule.Param["SkipComment"].(bool)
-	var escapeBracket = rule.Param["EscapeBracket"].(bool)
-	var skipClose = rule.Param["SkipClose"].(map[string]bool)
+	var unWrapID = make(map[int64]bool, len(opt.UnWrap))
+	var skipClose = map[string]bool{"a": true, "img": true, "hr": true, "br": true, "tr": true, "td": true, "th": true, "thead": true, "tbody": true, "link": true}
 
 	for idx, tag = range d.root {
 		if dropClose > 0 {
@@ -510,9 +625,9 @@ func (d *Dom) Tidy(entry *Entry, rule *Rule) {
 
 			continue
 		}
-		if "" != tag.name {
-			for _, r := range Drop {
-				if "" != tag.name && tag.Match(r) {
+		if ("start" == tag.category || "self" == tag.category) && "" != tag.name {
+			for _, r := range opt.selDrop {
+				if tag.Match(r) {
 					tag.Drop()
 					if tag.close > 0 {
 						dropClose = tag.close
@@ -524,8 +639,8 @@ func (d *Dom) Tidy(entry *Entry, rule *Rule) {
 			if dropClose > 0 {
 				continue
 			}
-			for _, r := range unWrap {
-				if "" != tag.name && tag.Match(r) {
+			for _, r := range opt.selUnWrap {
+				if tag.Match(r) {
 					tag.Drop()
 					if tag.close > 0 {
 						unWrapID[tag.close] = true
@@ -545,7 +660,7 @@ func (d *Dom) Tidy(entry *Entry, rule *Rule) {
 		if "html" == tag.name || "head" == tag.name || "body" == tag.name || "!doctype" == tag.name {
 			tag.Drop()
 		} else if "content" == tag.category {
-			for _, skip = range skips {
+			for _, skip = range opt.SkipContent {
 				if -1 != strings.Index(tag.value, skip) {
 					tag.Drop()
 
@@ -560,12 +675,16 @@ func (d *Dom) Tidy(entry *Entry, rule *Rule) {
 			}
 			if "" == tag.value {
 				tag.Drop()
-			} else if escapeBracket && "script" != lastTag && "style" != lastTag {
-				tag.value = strings.ReplaceAll(tag.value, "<", "&lt")
-				tag.value = strings.ReplaceAll(tag.value, ">", "&gt")
+			} else if idx > 0 && "script" != lastTag && "style" != lastTag && "pre" != lastTag {
+				if opt.EscapeBracket {
+					tag.value = strings.ReplaceAll(tag.value, "<", "&lt")
+					tag.value = strings.ReplaceAll(tag.value, ">", "&gt")
+				}
+
+				tag.value = stripSpaceMore(tag.value)
 			}
 		} else if "comment" == tag.category {
-			if skipComment {
+			if opt.SkipComment {
 				tag.Drop()
 			}
 		} else if "start" == tag.category {
@@ -583,6 +702,12 @@ func (d *Dom) Tidy(entry *Entry, rule *Rule) {
 			} else {
 				tag.Drop()
 			}
+		}
+		if opt.SkipEvent {
+			tag.StripEvent()
+		}
+		if opt.SkipEmptyAttr {
+			tag.StripEmpty()
 		}
 	}
 
@@ -606,15 +731,50 @@ func (d *Dom) Tidy(entry *Entry, rule *Rule) {
 	})
 }
 
-// Apply 应用清理规则
-func (d *Dom) Apply(entry *Entry, opt *TidyOption) {
-	var fn = map[string]func(entry *Entry, rule *Rule){
-		"Tidy": d.Tidy,
+// GetDirFiles 获取指定文件夹文件列表
+func GetDirFiles(dirPath string, stripExt bool, recursion bool, suffixes ...string) []string {
+	var idx int
+	var flag bool
+	var file string
+	var ret []string
+
+	if files, err := os.ReadDir(dirPath); nil == err && nil != files {
+		ret = make([]string, 0, len(files))
+		for _, v := range files {
+			if v.IsDir() && recursion {
+				if items := GetDirFiles(dirPath+"/"+v.Name(), stripExt, recursion, suffixes...); nil == err && len(items) > 0 {
+					ret = append(ret, items...)
+				}
+			} else {
+				flag = false
+				file = v.Name()
+
+				if len(suffixes) == 0 {
+					flag = true
+				} else {
+					for _, suffix := range suffixes {
+						if strings.HasSuffix(file, suffix) {
+							flag = true
+							break
+						}
+					}
+				}
+				if flag {
+					if stripExt {
+						if idx = strings.LastIndexByte(v.Name(), '.'); idx > 0 {
+							ret = append(ret, dirPath+"/"+strings.Trim(file[0:idx], " "))
+						} else {
+							ret = append(ret, dirPath+"/"+v.Name())
+						}
+					} else {
+						ret = append(ret, dirPath+"/"+v.Name())
+					}
+				}
+			}
+		}
 	}
 
-	for _, v := range opt.Rules {
-		fn[v.Action](entry, v)
-	}
+	return ret
 }
 
 // FilePutContents Put bytes to file.
@@ -663,19 +823,27 @@ func findChar(data string, char byte, start int, end int) int {
 }
 
 // 去除多余的空白符
-func stripSpace(data []byte) []byte {
-	data = bytes.ReplaceAll(data, []byte("\t"), []byte(" "))
-	data = bytes.ReplaceAll(data, []byte(" &nbsp; "), []byte(" "))
+func stripSpace(data string) string {
+	data = strings.ReplaceAll(data, "\t", " ")
+	data = strings.ReplaceAll(data, " &nbsp; ", " ")
 
 	for {
-		if -1 == bytes.Index(data, []byte("  ")) {
+		if -1 == strings.Index(data, "  ") {
 			break
 		}
 
-		data = bytes.ReplaceAll(data, []byte("  "), []byte(" "))
+		data = strings.ReplaceAll(data, "  ", " ")
 	}
 
-	return bytes.Trim(data, "\r\n\t ")
+	return strings.Trim(data, "\r\n\t ")
+}
+
+// 去除多余的空白符
+func stripSpaceMore(data string) string {
+	data = strings.ReplaceAll(data, "\n", " ")
+	data = strings.ReplaceAll(data, "\r", " ")
+
+	return stripSpace(data)
 }
 
 // 预解析词条
@@ -691,7 +859,7 @@ func parseBody(data []byte, start int, end int) *Entry {
 				last = idx
 				word = true
 				entry = &Entry{
-					word:  strings.Trim(string(data[start:idx]), "\r\n\t "),
+					word:  strings.Trim(string(data[start:idx]), "\r\n\t\"`, "),
 					start: start,
 					end:   end,
 				}
@@ -777,7 +945,7 @@ func stripBlockHoleEntry(in []*Entry) []*Entry {
 
 	for _, v := range in {
 		if len(v.word) > 1024 {
-			fmt.Println(v.word)
+			fmt.Println("long word:", v.word)
 		}
 		if "link" == strings.ToLower(v.action) {
 			if _, ok = link[v.word]; ok {
@@ -799,7 +967,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 	var tagStack = make([]*Tag, 0, 100)
 	var container = make([]*Tag, 0, 1000)
 	var checkOkPos = make(map[int]bool, 100)
-	var tagRegex = regexp.MustCompile(`^[a-zA-Z]+[0-9]*$`)
+	var tagRegex = regexp.MustCompile(`^[a-zA-Z]+[0-9]*\s*$`)
 	var cur, parent int64
 	var hitStart, hitEnd, isComment, isScriptOrStyle bool
 	var pos, idx, num, endPos, startPos, lastStartPos, lastPos, commentPos int
@@ -881,7 +1049,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 				tag = &Tag{
 					state:    true,
 					category: "close",
-					value:    data[startPos : endPos+1],
+					value:    stripSpaceMore(data[startPos : endPos+1]),
 					name:     strings.ToLower(data[startPos+2 : endPos]),
 				}
 
@@ -892,7 +1060,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 				tag = &Tag{
 					state:    true,
 					category: "self",
-					value:    data[startPos : endPos+1],
+					value:    stripSpaceMore(data[startPos : endPos+1]),
 				}
 
 				pos = findChar(data, ' ', startPos, endPos)
@@ -920,6 +1088,10 @@ func parseBodyItem(element *Entry, data string) *Dom {
 					tag.category = "self"
 				} else if "start" == tag.category && ("script" == tag.name || "style" == tag.name) {
 					isScriptOrStyle = true
+				}
+				if "start" == tag.category || "self" == tag.category {
+					tag.value = stripSpaceMore(tag.value)
+					tag.hasAttr = strings.Index(tag.value, "=") > 0
 				}
 			}
 
@@ -991,8 +1163,17 @@ func parseBodyItem(element *Entry, data string) *Dom {
 			value:    data,
 		})
 	} else {
-		if -1 == strings.Index(container[0].value, "\r\n") {
-			container[0].value = container[0].value + "\r\n"
+		if "content" == container[0].category {
+			if -1 != strings.Index(container[0].value, "&") {
+				container[0].value = html.UnescapeString(container[0].value)
+			}
+			if -1 != strings.Index(container[0].value, "%") {
+				if v, err := url.QueryUnescape(container[0].value); nil == err {
+					container[0].value = v
+				}
+			}
+
+			container[0].value = strings.Trim(container[0].value, "\r\n\t\"`', ") + "\r\n"
 		}
 	}
 
@@ -1061,11 +1242,11 @@ func tidyMdict(cfg string) error {
 	var dom *Dom
 	var element *Entry
 	var rawStyle [][]byte
-	var data, body []byte
+	var data []byte
 	var elements []*Entry
 	var container []string
 	var style map[string][2]string
-	var word, newBody, content string
+	var word, body, newBody, content string
 
 	var opt = new(TidyOption)
 	if err = LoadJSON(cfg, opt); nil != err {
@@ -1126,19 +1307,19 @@ func tidyMdict(cfg string) error {
 			continue
 		}
 
-		if body = stripSpace(data[element.start:element.end]); len(body) < 1 {
+		if body = stripSpace(string(data[element.start:element.end])); len(body) < 1 {
 			continue
 		}
 
 		if nil == style {
-			dom = parseBodyItem(element, string(body))
+			dom = parseBodyItem(element, body)
 		} else {
-			dom = parseBodyItem(element, prepareStyle(body, &style))
+			dom = parseBodyItem(element, prepareStyle([]byte(body), &style))
 		}
 
-		dom.Apply(element, opt)
-		newBody = dom.ToString()
-		if newBody = dom.ToString(); float64(len(body))*1.3 < float64(len(newBody)) {
+		dom.Tidy(element, opt)
+		newBody = dom.ToString(false)
+		if float64(len(body))*1.3 < float64(len(newBody)) {
 			fmt.Println("entry [" + element.word + "] parse failed, may be body incorrect")
 		}
 		if "" == newBody {
@@ -1167,7 +1348,7 @@ func tidyMdict(cfg string) error {
 func getSourceUsage(opt *CSSOption) (map[string]map[string]int, error) {
 	var tag *Tag
 	var pair []string
-	var ok, fintIt, hasSpace bool
+	var ok, findIt, hasSpace bool
 	var pos, spacePos, length int
 	var data, err = os.ReadFile(opt.Source)
 	var skipAttr = make(map[string]bool, len(opt.SkipAttr))
@@ -1190,46 +1371,46 @@ func getSourceUsage(opt *CSSOption) (map[string]map[string]int, error) {
 				}
 
 				pos = k
-				fintIt = true
-			} else if '>' == v && fintIt && hasSpace && spacePos > pos+1 {
-				fintIt = false
+				findIt = true
+			} else if '>' == v && findIt && hasSpace && spacePos > pos+1 {
+				findIt = false
 				hasSpace = false
 				tag = &Tag{name: strings.ToLower(string(data[pos+1 : spacePos])), value: string(data[pos : k+1])}
 				tag.name = string(data[pos+1 : spacePos])
 
-				tag.Get("id")
+				tag.Parse()
 				if _, ok = ret["tag"][tag.name]; ok {
 					ret["tag"][tag.name]++
 				} else {
 					ret["tag"][tag.name] = 1
 				}
-				for ka, va := range tag.attr {
-					if skipAttr[ka] {
+				for _, va := range tag.attrs {
+					if skipAttr[va.originalName] {
 						continue
 					}
-					if _, ok = ret[ka]; !ok {
-						ret[ka] = make(map[string]int)
+					if _, ok = ret[va.originalName]; !ok {
+						ret[va.originalName] = make(map[string]int)
 					}
 
-					if "class" == ka {
-						pair = strings.Split(va, " ")
+					if "class" == va.originalName {
+						pair = strings.Split(va.value, " ")
 						for _, ca := range pair {
-							if _, ok = ret[ka][ca]; ok {
-								ret[ka][ca]++
+							if _, ok = ret[va.originalName][ca]; ok {
+								ret[va.originalName][ca]++
 							} else {
-								ret[ka][ca] = 1
+								ret[va.originalName][ca] = 1
 							}
 						}
 					} else {
-						if _, ok = ret[ka][va]; ok {
-							ret[ka][va]++
+						if _, ok = ret[va.originalName][va.value]; ok {
+							ret[va.originalName][va.value]++
 						} else {
-							ret[ka][va] = 1
+							ret[va.originalName][va.value] = 1
 						}
 					}
 				}
-			} else if '>' == v && fintIt && !hasSpace && '/' != data[pos-1] {
-				fintIt = false
+			} else if '>' == v && findIt && !hasSpace && '/' != data[pos-1] {
+				findIt = false
 
 				if '/' == data[k-1] {
 					tag = &Tag{name: strings.ToLower(string(data[pos+1 : k-1]))}
@@ -1242,7 +1423,7 @@ func getSourceUsage(opt *CSSOption) (map[string]map[string]int, error) {
 				} else {
 					ret["tag"][tag.name] = 1
 				}
-			} else if ' ' == v && fintIt && !hasSpace {
+			} else if ' ' == v && findIt && !hasSpace {
 				spacePos = k
 				hasSpace = true
 			}
@@ -1344,7 +1525,7 @@ func getCSSUsage(opt *CSSOption) ([][3]string, error) {
 func tidyCSS(cfg string) error {
 	var err error
 	var data []byte
-	var fintIt bool
+	var findIt bool
 	var selector [][3]string
 	var tag, selT, sel4, sel5 string
 	var skipID, skipClass map[string]bool
@@ -1400,7 +1581,7 @@ func tidyCSS(cfg string) error {
 			if cssInUse, err = getSourceUsage(opt); nil == err {
 				for _, css := range selector {
 					if "css" == css[0] {
-						fintIt = false
+						findIt = false
 						sel1 = strings.Split(css[1], ",")
 
 						for _, sel4 = range sel1 {
@@ -1437,42 +1618,42 @@ func tidyCSS(cfg string) error {
 							if "class" == selT {
 								if "" == sel3[0] {
 									if cssInUse["class"][sel3[1]] > 0 {
-										fintIt = true
+										findIt = true
 									}
 								} else {
 									tag = strings.ToLower(sel3[0])
 									if cssInUse["tag"][tag] > 0 && cssInUse["class"][sel3[1]] > 0 {
-										fintIt = true
+										findIt = true
 									}
 								}
 							} else if "id" == selT {
 								if "" == sel3[0] {
 									if cssInUse["id"][sel3[1]] > 0 {
-										fintIt = true
+										findIt = true
 									}
 								} else {
 									tag = strings.ToLower(sel3[0])
 									if cssInUse["tag"][tag] > 0 && cssInUse["id"][sel3[1]] > 0 {
-										fintIt = true
+										findIt = true
 									}
 								}
 							} else if "attr" == selT {
 								if "" == sel3[0] {
-									fintIt = true
+									findIt = true
 								} else {
 									tag = strings.ToLower(sel3[0])
 									if cssInUse["tag"][tag] > 0 && cssInUse["id"][sel3[1]] > 0 {
-										fintIt = true
+										findIt = true
 									}
 								}
 							} else if "tag" == selT {
 								tag = strings.ToLower(sel3[0])
 								if cssInUse["tag"][tag] > 0 {
-									fintIt = true
+									findIt = true
 								}
 							}
 
-							if fintIt {
+							if findIt {
 								cssContent = append(cssContent, css[1]+" {"+opt.separator+css[2]+opt.separator+"}")
 
 								break
@@ -1509,6 +1690,8 @@ func mergeDict(cfg string) error {
 	var targetEntriesMap map[string][]int
 	var sourceEntries, targetEntries []*Entry
 	var opt = new(MergeOption)
+	var tagSelOrigin = &TagSelector{Type: "class", Tag: "div", Attr: "class", Value: []string{"origin"}}
+	var tagSelEx = &TagSelector{Type: "class", Tag: "div", Attr: "class", Value: []string{"example"}}
 
 	if err = LoadJSON(cfg, opt); nil != err {
 		err = errors.New("加载配置文件 " + cfg + " 失败，" + err.Error())
@@ -1544,11 +1727,12 @@ func mergeDict(cfg string) error {
 	targetEntriesMap = make(map[string][]int, len(targetEntries))
 
 	for k, v := range targetEntries {
+		v.word = strings.ToLower(v.word)
 		if _, ok = targetEntriesMap[v.word]; !ok {
 			targetEntriesMap[v.word] = make([]int, 0, 5)
 		}
 
-		targetContainer[k] = string(stripSpace(tData[v.start:v.end]))
+		targetContainer[k] = stripSpace(string(tData[v.start:v.end]))
 		targetEntriesMap[v.word] = append(targetEntriesMap[v.word], k)
 	}
 	for _, element = range sourceEntries {
@@ -1557,6 +1741,7 @@ func mergeDict(cfg string) error {
 			continue
 		}
 
+		element.word = strings.ToLower(element.word)
 		if v, ok := targetEntriesMap[element.word]; ok {
 			for _, k1 := range v {
 				if k1 < len(targetEntries) {
@@ -1574,19 +1759,19 @@ func mergeDict(cfg string) error {
 				}
 			}
 			if "" != body {
-				sDom = parseBodyItem(element, string(stripSpace(sData[element.start:element.end])))
-				origin = sDom.Find("div.origin").ToString()
+				sDom = parseBodyItem(element, stripSpace(string(sData[element.start:element.end])))
+				origin = sDom.Find(tagSelOrigin).ToString(false)
 				tDom = parseBodyItem(element, body)
-				exIdx = tDom.Find("div.example").GetSubIdx(0)
+				exIdx = tDom.Find(tagSelEx).GetSubIdx(0)
 
 				if "" != origin && exIdx > 0 {
 					tDom.Insert(origin, exIdx, true)
 
-					targetContainer[idx] = tDom.ToString()
+					targetContainer[idx] = tDom.ToString(false)
 				}
 			}
 		} else {
-			targetContainer = append(targetContainer, string(stripSpace(sData[element.start:element.end])))
+			targetContainer = append(targetContainer, stripSpace(string(sData[element.start:element.end])))
 			targetEntriesMap[element.word] = []int{len(targetContainer) - 1}
 		}
 	}
