@@ -660,28 +660,57 @@ func (d *Dom) Tidy(entry *Entry, opt *TidyOption) {
 		if "html" == tag.name || "head" == tag.name || "body" == tag.name || "!doctype" == tag.name {
 			tag.Drop()
 		} else if "content" == tag.category {
-			for _, skip = range opt.SkipContent {
-				if -1 != strings.Index(tag.value, skip) {
+			if 0 == idx {
+				continue
+			}
+			if "script" == lastTag || "style" == lastTag || "pre" == lastTag {
+				tag.value = strings.Trim(tag.value, "\r\n\t ")
+			} else {
+				for _, skip = range opt.SkipContent {
+					if -1 != strings.Index(tag.value, skip) {
+						tag.Drop()
+
+						if num = len(tags); num > 0 && idx+1 < len(d.root) && tags[num-1].id == d.root[idx-1].id && d.root[idx-1].close == d.root[idx+1].id {
+							tags = tags[:num-1]
+							d.root[idx-1].Drop()
+							d.root[idx+1].Drop()
+						}
+
+						break
+					}
+				}
+				if !tag.state {
+					continue
+				}
+
+				var hasFirstSpace = false
+				var hasEndSpace = false
+				var lastIdx = len(tag.value) - 1
+
+				if '\r' == tag.value[0] || '\n' == tag.value[0] || '\t' == tag.value[0] || ' ' == tag.value[0] {
+					hasFirstSpace = true
+				}
+				if '\r' == tag.value[lastIdx] || '\n' == tag.value[lastIdx] || '\t' == tag.value[lastIdx] || ' ' == tag.value[lastIdx] {
+					hasEndSpace = true
+				}
+
+				tag.value = stripSpaceMore(tag.value)
+				if "" == tag.value {
 					tag.Drop()
 
-					if num = len(tags); num > 0 && idx+1 < len(d.root) && tags[num-1].id == d.root[idx-1].id && d.root[idx-1].close == d.root[idx+1].id {
-						tags = tags[:num-1]
-						d.root[idx-1].Drop()
-						d.root[idx+1].Drop()
-					}
-
-					break
+					continue
 				}
-			}
-			if "" == tag.value {
-				tag.Drop()
-			} else if idx > 0 && "script" != lastTag && "style" != lastTag && "pre" != lastTag {
+
+				if hasFirstSpace {
+					tag.value = " " + tag.value
+				}
+				if hasEndSpace {
+					tag.value = tag.value + " "
+				}
 				if opt.EscapeBracket {
 					tag.value = strings.ReplaceAll(tag.value, "<", "&lt")
 					tag.value = strings.ReplaceAll(tag.value, ">", "&gt")
 				}
-
-				tag.value = stripSpaceMore(tag.value)
 			}
 		} else if "comment" == tag.category {
 			if opt.SkipComment {
@@ -812,9 +841,17 @@ func LoadJSON(file string, in interface{}) error {
 }
 
 // findChar 从指定位置找字符
-func findChar(data string, char byte, start int, end int) int {
+func findChar(data string, need string, start int, end int) int {
+	var char byte
+	var chars = make(map[byte]bool, len(need))
+
+	for _, char = range []byte(need) {
+		chars[char] = true
+	}
 	for i := start; i < end; i++ {
-		if char == data[i] {
+		char = data[i]
+
+		if chars[char] {
 			return i
 		}
 	}
@@ -824,6 +861,7 @@ func findChar(data string, char byte, start int, end int) int {
 
 // 去除多余的空白符
 func stripSpace(data string) string {
+	data = strings.ReplaceAll(data, " ", " ")
 	data = strings.ReplaceAll(data, "\t", " ")
 	data = strings.ReplaceAll(data, " &nbsp; ", " ")
 
@@ -1015,7 +1053,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 		if hitStart && !hitEnd && !isComment && !isScriptOrStyle && startPos+1 < idx {
 			if idx-startPos > 15 {
 				if !checkOkPos[startPos] {
-					pos = findChar(data, ' ', startPos, idx)
+					pos = findChar(data, "\r\n\t ", startPos, idx)
 					if pos > 0 {
 						if !tagRegex.MatchString(data[startPos+1 : pos]) {
 							startPos = lastStartPos
@@ -1063,7 +1101,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 					value:    stripSpaceMore(data[startPos : endPos+1]),
 				}
 
-				pos = findChar(data, ' ', startPos, endPos)
+				pos = findChar(data, "\r\n\t ", startPos, endPos)
 				if pos > 0 && pos < endPos {
 					tag.name = data[startPos+1 : pos]
 				} else {
@@ -1076,7 +1114,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 					value:    data[startPos : endPos+1],
 				}
 
-				pos = findChar(data, ' ', startPos, endPos)
+				pos = findChar(data, "\r\n\t ", startPos, endPos)
 				if pos > 0 && pos < endPos {
 					tag.name = strings.Trim(strings.ToLower(data[startPos+1:pos]), "\r\n\t ")
 				} else {
@@ -1133,7 +1171,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 				id:       cur*10000 + 5000,
 				parent:   parent,
 				category: "content",
-				value:    strings.Trim(data[lastPos:idx], "\r\n\t "),
+				value:    data[lastPos:idx],
 			}
 
 			lastPos = idx
@@ -1149,7 +1187,7 @@ func parseBodyItem(element *Entry, data string) *Dom {
 					id:       cur*10000 + 5000,
 					parent:   parent,
 					category: "content",
-					value:    strings.Trim(data[lastPos:], "\r\n\t "),
+					value:    data[lastPos:],
 				})
 			}
 		}
